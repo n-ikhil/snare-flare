@@ -103,9 +103,13 @@ class MIDIHandler:
             logger.info(f"🎵 Drum hit detected: note={msg.note}, velocity={msg.velocity}")
             if self.callback:
                 try:
+                    logger.debug(f"Calling callback with note={msg.note}, velocity={msg.velocity}")
                     self.callback(msg.note, msg.velocity)
+                    logger.debug("Callback completed successfully")
                 except Exception as e:
-                    logger.error(f"Error in MIDI callback: {e}")
+                    logger.error(f"Error in MIDI callback: {e}", exc_info=True)
+            else:
+                logger.warning("No callback set! MIDI event received but not processed.")
         elif msg.type == 'note_on' and msg.velocity == 0:
             # Note On with velocity 0 is actually a Note Off
             if self.verbose:
@@ -121,30 +125,37 @@ class MIDIHandler:
     def _listen_loop(self):
         """Internal loop that listens for MIDI messages."""
         if not self.port:
+            logger.error("Cannot start listen loop: port is None")
             return
 
+        logger.info(f"Starting MIDI listen loop on port: {self.port_name}")
         try:
             for msg in self.port:
                 if not self.running:
+                    logger.info("Listen loop stopping (running=False)")
                     break
                 self._process_midi_message(msg)
         except Exception as e:
             if self.running:  # Only log if we're supposed to be running
-                logger.error(f"Error in MIDI listen loop: {e}")
+                logger.error(f"Error in MIDI listen loop: {e}", exc_info=True)
 
     def start_listening(self):
         """Start listening for MIDI events in a background thread."""
         if self.running:
+            logger.warning("Already listening for MIDI events")
             return
 
         if not self.port:
             logger.error("Cannot start listening: not connected to a MIDI port")
             return
 
+        if not self.callback:
+            logger.warning("No callback set! MIDI events will be received but not processed.")
+
         self.running = True
         self.thread = threading.Thread(target=self._listen_loop, daemon=True)
         self.thread.start()
-        logger.info("Started listening for MIDI events")
+        logger.info(f"Started listening for MIDI events on port: {self.port_name}")
 
     def stop_listening(self):
         """Stop listening for MIDI events."""

@@ -9,6 +9,7 @@ import asyncio
 import sys
 import argparse
 import logging
+import time
 from typing import Optional, Tuple
 from asyncio import Queue
 
@@ -31,8 +32,9 @@ class MIDISync:
         self,
         midi_port: Optional[str] = None,
         led_address: Optional[str] = None,
-        flash_duration: float = 0.1,
+        flash_duration: float = 0.05,  # Reduced default for lower latency
         verbose: bool = False,
+        max_event_age: float = 1.0,
     ):
         """
         Initialize MIDI sync.
@@ -42,6 +44,8 @@ class MIDISync:
             led_address: LED device address. If None, will prompt for selection.
             flash_duration: Duration in seconds for flash effect on drum hit.
             verbose: Enable verbose MIDI logging.
+            max_event_age: Maximum age in seconds for events to be processed (default: 1.0).
+                          Events older than this will be skipped.
         """
         self.midi_handler = MIDIHandler(verbose=verbose)
         self.drum_mapper = DrumMapper()
@@ -49,10 +53,18 @@ class MIDISync:
         self.midi_port = midi_port
         self.led_address = led_address
         self.flash_duration = flash_duration
-        self.midi_queue: Queue[Tuple[int, int]] = Queue()
+        # Use larger queues to prevent blocking - drop oldest if full
+        # Queue items: (note, velocity, timestamp)
+        self.midi_queue: Queue[Tuple[int, int, float]] = Queue(maxsize=10)
+        # High-priority queue for kicks
+        self.kick_queue: Queue[Tuple[int, int, float]] = Queue(maxsize=5)
+        self.max_event_age = max_event_age  # Skip events older than this
         self.running = False
         self.original_brightness: Optional[int] = None
         self.original_color: Optional[Tuple[int, int, int]] = None
+        # Track active LED tasks to cancel old ones
+        self.active_led_task: Optional[asyncio.Task] = None
+        self.active_kick_task: Optional[asyncio.Task] = None
 
     async def setup_midi(self) -> bool:
         """Set up MIDI input connection."""
@@ -117,16 +129,57 @@ class MIDISync:
 
         if self.midi_handler.connect(selected_port):
             print(f"✅ Connected to MIDI port: {selected_port}")
-            # Set callback to queue MIDI events
+            # Set callback to queue MIDI events BEFORE starting to listen
             self.midi_handler.set_callback(self._midi_callback)
+            logger.info("MIDI callback set successfully")
             return True
         return False
 
     def _midi_callback(self, note: int, velocity: int):
         """Callback for MIDI events (runs in MIDI thread)."""
-        # Put event in queue for async processing
+        logger.info(f"🎵 MIDI callback received: note={note}, velocity={velocity}")
+        # Check if it's a kick - prioritize kicks
+        drum_type = self.drum_mapper.get_drum_type(note)
+        is_kick = (drum_type == DrumType.KICK)
+        logger.debug(f"Drum type: {drum_type}, is_kick: {is_kick}")
+        
+        # Add timestamp to event
+        timestamp = time.time()
+        
+        # Put event in appropriate queue (drops old if queue full)
+        # Always make room first by removing old event, then add new one
         try:
-            self.midi_queue.put_nowait((note, velocity))
+            if is_kick:
+                # Kicks go to high-priority queue
+                try:
+                    self.kick_queue.put_nowait((note, velocity, timestamp))
+                    logger.info(f"✅ Kick event queued: note={note}, velocity={velocity}")
+                except asyncio.QueueFull:
+                    # Queue full - drop oldest and add new
+                    try:
+                        self.kick_queue.get_nowait()  # Remove oldest
+                        self.kick_queue.put_nowait((note, velocity, timestamp))  # Add new
+                        logger.warning(f"⚠️ Kick queue full, dropped oldest event. Queued: note={note}, velocity={velocity}")
+                    except Exception as e:
+                        logger.error(f"Failed to queue kick event after dropping oldest: {e}")
+                except Exception as e:
+                    logger.error(f"Failed to queue kick event: {e}")
+            else:
+                # Other drums go to regular queue
+                try:
+                    self.midi_queue.put_nowait((note, velocity, timestamp))
+                    logger.info(f"✅ MIDI event queued: note={note}, velocity={velocity}")
+                except asyncio.QueueFull:
+                    # Queue full - drop oldest and add new
+                    try:
+                        self.midi_queue.get_nowait()  # Remove oldest
+                        self.midi_queue.put_nowait((note, velocity, timestamp))  # Add new
+                        logger.warning(f"⚠️ MIDI queue full, dropped oldest event. Queued: note={note}, velocity={velocity}")
+                    except Exception as e:
+                        logger.error(f"Failed to queue MIDI event after dropping oldest: {e}")
+                except Exception as e:
+                    logger.error(f"Failed to queue MIDI event: {e}")
+                    pass  # Shouldn't happen, but handle gracefully
         except Exception as e:
             logger.error(f"Error queueing MIDI event: {e}")
 
@@ -180,37 +233,79 @@ class MIDISync:
             return True
         return False
 
-    async def process_midi_event(self, note: int, velocity: int):
+    async def _flash_led(self, color: Tuple[int, int, int], brightness: int, is_kick: bool = False):
+        """
+        Flash LED with color and brightness (always non-blocking).
+        
+        Args:
+            color: RGB color tuple
+            brightness: Brightness percentage (0-100)
+            is_kick: If True, this is a kick (higher priority)
+        """
+        try:
+            # Cancel previous LED task if it exists
+            if is_kick:
+                # Cancel previous kick task
+                if self.active_kick_task and not self.active_kick_task.done():
+                    self.active_kick_task.cancel()
+                    try:
+                        await self.active_kick_task
+                    except asyncio.CancelledError:
+                        pass
+            else:
+                # Cancel previous non-kick task
+                if self.active_led_task and not self.active_led_task.done():
+                    self.active_led_task.cancel()
+                    try:
+                        await self.active_led_task
+                    except asyncio.CancelledError:
+                        pass
+            
+            # Set color and brightness immediately
+            await self.led_controller.set_color(*color)
+            await self.led_controller.set_brightness(brightness)
+            
+            # Always use non-blocking tasks for fade-back
+            async def fade_back():
+                await asyncio.sleep(self.flash_duration)
+                fade_brightness = max(20, int(brightness * 0.3))
+                await self.led_controller.set_brightness(fade_brightness)
+                # Reset color back to original after fade
+                if self.original_color:
+                    await self.led_controller.set_color(*self.original_color)
+            
+            # Create task for fade-back (non-blocking)
+            if is_kick:
+                self.active_kick_task = asyncio.create_task(fade_back())
+            else:
+                self.active_led_task = asyncio.create_task(fade_back())
+            
+        except Exception as e:
+            logger.error(f"Error flashing LED: {e}", exc_info=True)
+
+    async def process_midi_event(self, note: int, velocity: int, is_kick: bool = False):
         """
         Process a MIDI event and trigger LED response.
         
         Args:
             note: MIDI note number
             velocity: MIDI velocity (0-127)
+            is_kick: If True, this is a kick (higher priority)
         """
         # Get drum type, color, and brightness
         drum_type = self.drum_mapper.get_drum_type(note)
         color, brightness = self.drum_mapper.get_color_and_brightness(note, velocity)
         drum_name = self.drum_mapper.get_drum_name(note)
 
-        logger.info(f"🎯 Processing: {drum_name} (note {note}, velocity {velocity}) -> RGB{color} @ {brightness}%")
-        print(f"💥 {drum_name.upper()} hit! → RGB{color} @ {brightness}%")
+        # Only log kicks to reduce overhead
+        if is_kick:
+            logger.info(f"🥁 KICK! (note {note}, velocity {velocity}) -> RGB{color} @ {brightness}%")
+            print(f"🥁 KICK! → RGB{color} @ {brightness}%")
+        else:
+            logger.debug(f"🎯 {drum_name} (note {note}, velocity {velocity}) -> RGB{color} @ {brightness}%")
 
-        # Flash effect: set color and brightness, then fade back
-        try:
-            # Set color and brightness for the hit
-            await self.led_controller.set_color(*color)
-            await self.led_controller.set_brightness(brightness)
-            
-            # Wait for flash duration
-            await asyncio.sleep(self.flash_duration)
-            
-            # Fade back to original (or dimmed version)
-            fade_brightness = max(20, int(brightness * 0.3))  # Fade to 30% of hit brightness, min 20%
-            await self.led_controller.set_brightness(fade_brightness)
-            
-        except Exception as e:
-            logger.error(f"Error processing MIDI event: {e}")
+        # Flash LED (non-blocking for non-kicks)
+        await self._flash_led(color, brightness, is_kick=is_kick)
 
     async def run(self):
         """Main run loop - processes MIDI events and controls LEDs."""
@@ -242,20 +337,59 @@ class MIDISync:
         print("="*60 + "\n")
 
         try:
-            # Main event loop
+            logger.info("Main event loop started, waiting for MIDI events...")
+            # Main event loop - prioritize kicks, always non-blocking, skip stale events
             while self.running:
                 try:
-                    # Wait for MIDI event with timeout to allow checking running state
-                    note, velocity = await asyncio.wait_for(
-                        self.midi_queue.get(), timeout=0.5
-                    )
-                    # Process the event
-                    await self.process_midi_event(note, velocity)
-                except asyncio.TimeoutError:
-                    # Timeout is fine, just check if we should continue
-                    continue
+                    # Check kick queue first (high priority)
+                    # Process all fresh kicks, skip stale ones
+                    kick_processed = False
+                    while True:
+                        try:
+                            note, velocity, timestamp = self.kick_queue.get_nowait()
+                            # Calculate age right now, not at start of loop
+                            current_time = time.time()
+                            age = current_time - timestamp
+                            
+                            if age > self.max_event_age:
+                                # Event is too old, skip it
+                                logger.debug(f"⏭️ Skipping stale kick: note={note}, age={age:.3f}s")
+                                continue
+                            
+                            logger.info(f"Processing kick from queue: note={note}, velocity={velocity}, age={age:.3f}s")
+                            # Process kick (now non-blocking)
+                            asyncio.create_task(self.process_midi_event(note, velocity, is_kick=True))
+                            kick_processed = True
+                        except asyncio.QueueEmpty:
+                            break
+                    
+                    if kick_processed:
+                        continue
+                    
+                    # Then check regular queue (non-kicks)
+                    # Process all fresh events, skip stale ones
+                    try:
+                        note, velocity, timestamp = await asyncio.wait_for(
+                            self.midi_queue.get(), timeout=0.01  # Short timeout to check kicks frequently
+                        )
+                        # Calculate age right after getting event from queue
+                        current_time = time.time()
+                        age = current_time - timestamp
+                        
+                        if age > self.max_event_age:
+                            # Event is too old, skip it and try next
+                            logger.debug(f"⏭️ Skipping stale MIDI event: note={note}, age={age:.3f}s")
+                            continue
+                        
+                        logger.info(f"Processing MIDI event from queue: note={note}, velocity={velocity}, age={age:.3f}s")
+                        # Process non-kick (non-blocking)
+                        asyncio.create_task(self.process_midi_event(note, velocity, is_kick=False))
+                    except asyncio.TimeoutError:
+                        # No events, continue to check kicks again
+                        continue
+                        
                 except Exception as e:
-                    logger.error(f"Error in main loop: {e}")
+                    logger.error(f"Error in main loop: {e}", exc_info=True)
 
         except KeyboardInterrupt:
             print("\n\n⏹️  Stopping...")
@@ -290,6 +424,7 @@ class Args(argparse.Namespace):
     led_address: Optional[str]
     flash_duration: float
     verbose: bool
+    max_event_age: float
 
 
 
@@ -368,6 +503,7 @@ async def main(args: Args):
         led_address=args.led_address,
         flash_duration=args.flash_duration,
         verbose=args.verbose,
+        max_event_age=args.max_event_age,
     )
 
     success = await sync.run()
@@ -395,8 +531,15 @@ def cli():
     parser.add_argument(
         "--flash-duration",
         type=float,
-        default=0.1,
-        help="Duration in seconds for flash effect on drum hit (default: 0.1)",
+        default=0.05,
+        help="Duration in seconds for flash effect on drum hit (default: 0.05)",
+    )
+
+    parser.add_argument(
+        "--max-event-age",
+        type=float,
+        default=1.0,
+        help="Maximum age in seconds for events to be processed. Events older than this will be skipped (default: 1.0)",
     )
 
     parser.add_argument(

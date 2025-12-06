@@ -1,7 +1,7 @@
 [project]
-name = "led"
+name = "snare_flare"
 version = "0.1.0"
-description = "Python app to control LEDDMX-00 Bluetooth LED devices"
+description = "Real-time MIDI drum input to LED light synchronization - syncs drum hits from MIDI devices (e.g., Alesis drum kits, GarageBand) with LEDDMX-00 Bluetooth LED devices for visual drum performance effects"
 requires-python = ">=3.8"
 dependencies = [
     "bleak>=0.21.0",
