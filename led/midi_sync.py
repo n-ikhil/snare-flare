@@ -65,7 +65,11 @@ class MIDISync:
 
         print("\n📻 Available MIDI input ports:")
         for i, port in enumerate(ports, 1):
-            marker = " ← GarageBand" if "garageband" in port.lower() or "iac" in port.lower() else ""
+            port_lower = port.lower()
+            if any(virtual in port_lower for virtual in ["virtual", "iac", "garageband"]):
+                marker = " ← Virtual"
+            else:
+                marker = " ← Hardware"
             print(f"   {i}. {port}{marker}")
 
         # Auto-select or prompt
@@ -307,15 +311,30 @@ async def main(args: Args):
         
         print("\n📻 Available MIDI input ports:")
         for i, port in enumerate(ports, 1):
-            marker = " ← GarageBand" if "garageband" in port.lower() or "iac" in port.lower() else ""
+            port_lower = port.lower()
+            if any(virtual in port_lower for virtual in ["virtual", "iac", "garageband"]):
+                marker = " ← Virtual"
+            else:
+                marker = " ← Hardware"
             print(f"   {i}. {port}{marker}")
         
         selected_port = args.midi_port
         if not selected_port:
+            # Prioritize hardware devices over virtual ports
             for port in ports:
-                if "garageband" in port.lower() or "iac" in port.lower():
+                port_lower = port.lower()
+                if not any(virtual in port_lower for virtual in ["virtual", "iac", "garageband"]):
                     selected_port = port
                     break
+            
+            # Fall back to virtual ports
+            if not selected_port:
+                for port in ports:
+                    if "garageband" in port.lower() or "iac" in port.lower():
+                        selected_port = port
+                        break
+            
+            # Final fallback
             if not selected_port and len(ports) == 1:
                 selected_port = ports[0]
         
