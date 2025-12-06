@@ -5,11 +5,14 @@ description = "Python app to control LEDDMX-00 Bluetooth LED devices"
 requires-python = ">=3.8"
 dependencies = [
     "bleak>=0.21.0",
+    "mido>=1.2.10",
+    "python-rtmidi>=1.4.9",
 ]
 
 [project.scripts]
 discoverer = "led.discoverer:cli"
 neon = "led.neon:cli"
+midi-sync = "led.midi_sync:cli"
 
 [build-system]
 requires = ["hatchling"]
