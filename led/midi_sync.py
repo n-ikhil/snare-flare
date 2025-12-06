@@ -32,6 +32,7 @@ class MIDISync:
         midi_port: Optional[str] = None,
         led_address: Optional[str] = None,
         flash_duration: float = 0.1,
+        verbose: bool = False,
     ):
         """
         Initialize MIDI sync.
@@ -40,8 +41,9 @@ class MIDISync:
             midi_port: MIDI input port name. If None, will auto-detect.
             led_address: LED device address. If None, will prompt for selection.
             flash_duration: Duration in seconds for flash effect on drum hit.
+            verbose: Enable verbose MIDI logging.
         """
-        self.midi_handler = MIDIHandler()
+        self.midi_handler = MIDIHandler(verbose=verbose)
         self.drum_mapper = DrumMapper()
         self.led_controller = LEDController()
         self.midi_port = midi_port
@@ -73,13 +75,24 @@ class MIDISync:
                 return False
             selected_port = self.midi_port
         else:
-            # Auto-detect GarageBand
+            # Auto-detect: prioritize hardware devices over virtual ports
             selected_port = None
+            
+            # First, look for hardware MIDI devices (not virtual)
             for port in ports:
-                if "garageband" in port.lower() or "iac" in port.lower():
+                port_lower = port.lower()
+                if not any(virtual in port_lower for virtual in ["virtual", "iac", "garageband"]):
                     selected_port = port
                     break
             
+            # Fall back to GarageBand/IAC if no hardware found
+            if not selected_port:
+                for port in ports:
+                    if "garageband" in port.lower() or "iac" in port.lower():
+                        selected_port = port
+                        break
+            
+            # Final fallback: first available port or prompt
             if not selected_port:
                 if len(ports) == 1:
                     selected_port = ports[0]
@@ -176,7 +189,8 @@ class MIDISync:
         color, brightness = self.drum_mapper.get_color_and_brightness(note, velocity)
         drum_name = self.drum_mapper.get_drum_name(note)
 
-        logger.debug(f"Drum hit: {drum_name} (note {note}, velocity {velocity}) -> RGB{color} @ {brightness}%")
+        logger.info(f"🎯 Processing: {drum_name} (note {note}, velocity {velocity}) -> RGB{color} @ {brightness}%")
+        print(f"💥 {drum_name.upper()} hit! → RGB{color} @ {brightness}%")
 
         # Flash effect: set color and brightness, then fade back
         try:
@@ -212,8 +226,15 @@ class MIDISync:
         print("\n" + "="*60)
         print("🎵 MIDI-to-LED Sync Active!")
         print("="*60)
-        print("Hit your drums in GarageBand to see the lights respond!")
-        print("Press Ctrl+C to stop.")
+        print(f"📻 Listening on MIDI port: {self.midi_handler.port_name}")
+        print(f"💡 Connected to LED: {self.led_controller.device_address}")
+        print("\nHit your drums in GarageBand to see the lights respond!")
+        print("(Watch for '💥' messages when drums are hit)")
+        print("\n⚠️  If no events appear, check:")
+        print("   1. GarageBand MIDI routing (may need IAC driver)")
+        print("   2. Run with --test-midi to verify MIDI input")
+        print("   3. Run with -v to see all MIDI messages")
+        print("\nPress Ctrl+C to stop.")
         print("="*60 + "\n")
 
         try:
@@ -267,15 +288,67 @@ class Args(argparse.Namespace):
     verbose: bool
 
 
+
+
 async def main(args: Args):
     """Main entry point."""
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Test mode: just listen to MIDI
+    if args.test_midi:
+        # Need to handle async connect properly
+        handler = MIDIHandler()
+        ports = handler.list_input_ports()
+        
+        if not ports:
+            print("❌ No MIDI input ports found!")
+            return 1
+        
+        print("\n📻 Available MIDI input ports:")
+        for i, port in enumerate(ports, 1):
+            marker = " ← GarageBand" if "garageband" in port.lower() or "iac" in port.lower() else ""
+            print(f"   {i}. {port}{marker}")
+        
+        selected_port = args.midi_port
+        if not selected_port:
+            for port in ports:
+                if "garageband" in port.lower() or "iac" in port.lower():
+                    selected_port = port
+                    break
+            if not selected_port and len(ports) == 1:
+                selected_port = ports[0]
+        
+        if not handler.connect(selected_port):
+            return 1
+        
+        print(f"\n✅ Connected to MIDI port: {handler.port_name}")
+        print("🎵 Listening for MIDI events... (Press Ctrl+C to stop)\n")
+        
+        def print_midi_event(note: int, velocity: int):
+            drum_mapper = DrumMapper()
+            drum_name = drum_mapper.get_drum_name(note)
+            print(f"💥 MIDI Event: note={note} ({drum_name}), velocity={velocity}")
+        
+        handler.set_callback(print_midi_event)
+        handler.start_listening()
+        
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            print("\n\n⏹️  Stopping...")
+        finally:
+            handler.stop_listening()
+            handler.disconnect()
+        
+        return 0
+
     sync = MIDISync(
         midi_port=args.midi_port,
         led_address=args.led_address,
         flash_duration=args.flash_duration,
+        verbose=args.verbose,
     )
 
     success = await sync.run()
@@ -310,7 +383,13 @@ def cli():
     parser.add_argument(
         "-v", "--verbose",
         action="store_true",
-        help="Enable verbose logging",
+        help="Enable verbose logging (shows all MIDI messages)",
+    )
+    
+    parser.add_argument(
+        "--test-midi",
+        action="store_true",
+        help="Test mode: just listen to MIDI and print events (no LED control)",
     )
 
     args = parser.parse_args(namespace=Args())

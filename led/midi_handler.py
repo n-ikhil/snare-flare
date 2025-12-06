@@ -15,12 +15,13 @@ logger = logging.getLogger(__name__)
 class MIDIHandler:
     """Handles MIDI input from external sources (e.g., GarageBand)."""
 
-    def __init__(self):
+    def __init__(self, verbose: bool = False):
         self.port: Optional[mido.ports.BaseInput] = None
         self.port_name: Optional[str] = None
         self.callback: Optional[Callable[[int, int], None]] = None
         self.running = False
         self.thread: Optional[threading.Thread] = None
+        self.verbose = verbose
 
     def list_input_ports(self) -> List[str]:
         """List all available MIDI input ports."""
@@ -91,13 +92,31 @@ class MIDIHandler:
 
     def _process_midi_message(self, msg: mido.Message):
         """Process a MIDI message and trigger callback if it's a Note On event."""
+        # Log all MIDI messages for debugging
+        if self.verbose:
+            logger.info(f"MIDI message: {msg}")
+        else:
+            logger.debug(f"MIDI message received: {msg}")
+        
         if msg.type == 'note_on' and msg.velocity > 0:
             # Note On event with velocity > 0 (actual hit)
+            logger.info(f"🎵 Drum hit detected: note={msg.note}, velocity={msg.velocity}")
             if self.callback:
                 try:
                     self.callback(msg.note, msg.velocity)
                 except Exception as e:
                     logger.error(f"Error in MIDI callback: {e}")
+        elif msg.type == 'note_on' and msg.velocity == 0:
+            # Note On with velocity 0 is actually a Note Off
+            if self.verbose:
+                logger.info(f"Note Off (via note_on): note={msg.note}")
+            else:
+                logger.debug(f"Note Off: note={msg.note}")
+        elif msg.type == 'note_off':
+            if self.verbose:
+                logger.info(f"Note Off: note={msg.note}")
+            else:
+                logger.debug(f"Note Off: note={msg.note}")
 
     def _listen_loop(self):
         """Internal loop that listens for MIDI messages."""
