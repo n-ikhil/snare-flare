@@ -171,7 +171,7 @@ led/
 
 ## Usage Flow
 1. User starts GarageBand and loads a drum track
-2. User runs: `python -m led.midi_sync` (or CLI command)
+2. User runs: `midi-sync` (or CLI command)
 3. Script lists available MIDI input ports
 4. User selects GarageBand's MIDI port
 5. Script scans for LEDDMX devices

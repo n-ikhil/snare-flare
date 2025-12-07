@@ -53,14 +53,44 @@ DRUM_NOTES: Dict[int, DrumType] = {
 }
 
 # Default color mappings (RGB 0-255)
-DEFAULT_DRUM_COLORS: Dict[DrumType, Tuple[int, int, int]] = {
+# DEFAULT_DRUM_COLORS: Dict[DrumType, Tuple[int, int, int]] = {
+#     DrumType.KICK: (255, 0, 0),      # Red
+#     DrumType.SNARE: (255, 255, 255), # White
+#     DrumType.HIHAT: (0, 255, 255),   # Cyan
+#     DrumType.CRASH: (255, 255, 0),   # Yellow
+#     DrumType.RIDE: (255, 165, 0),    # Orange
+#     DrumType.TOM: (0, 255, 0),        # Green
+#     DrumType.UNKNOWN: (128, 128, 128), # Gray
+# }
+
+# Fiery color mappings (RGB 0-255)
+# DEFAULT_DRUM_COLORS = {
+#     # DrumType.KICK:    (200, 30, 0),     # Deep Ember Red
+#     DrumType.KICK: (255, 0, 0),      # Red
+#     # DrumType.SNARE:   (255, 240, 200),  # Warm Flame White
+#     DrumType.SNARE:  (235, 152, 232),  # honeydew
+
+#     DrumType.HIHAT:   (255, 180, 40),   # Sparky Gold
+#     DrumType.CRASH:   (255, 200, 0),    # Bright Fire Yellow
+#     DrumType.RIDE:    (255, 100, 0),    # Molten Orange
+#     DrumType.TOM:     (255, 60, 0),     # Lava Glow
+#     DrumType.UNKNOWN: (70, 40, 30),     # Charcoal Ember
+# }
+
+
+
+# Smooth color mappings (RGB 0-255)
+DEFAULT_DRUM_COLORS = {
+    # DrumType.KICK:    (200, 30, 0),     # Deep Ember Red
     DrumType.KICK: (255, 0, 0),      # Red
-    DrumType.SNARE: (255, 255, 255), # White
-    DrumType.HIHAT: (0, 255, 255),   # Cyan
-    DrumType.CRASH: (255, 255, 0),   # Yellow
-    DrumType.RIDE: (255, 165, 0),    # Orange
-    DrumType.TOM: (0, 255, 0),        # Green
-    DrumType.UNKNOWN: (128, 128, 128), # Gray
+    # DrumType.SNARE:   (255, 240, 200),  # Warm Flame White
+    # DrumType.SNARE:  (255, 255, 255),  # white
+
+    DrumType.HIHAT:   (255, 180, 40),   # Sparky Gold
+    DrumType.CRASH:   (255, 180, 40),    # Bright Fire Yellow
+    DrumType.RIDE:    (255, 180, 40),   # Molten Orange
+    # DrumType.TOM:     (255, 255, 255),     # Lava Glow
+    DrumType.UNKNOWN: (255, 100, 0),     # Charcoal Ember
 }
 
 

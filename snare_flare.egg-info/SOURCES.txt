@@ -1,0 +1,13 @@
+README.md
+discoverer.py
+drum_mapper.py
+midi_handler.py
+midi_sync.py
+neon.py
+pyproject.toml
+snare_flare.egg-info/PKG-INFO
+snare_flare.egg-info/SOURCES.txt
+snare_flare.egg-info/dependency_links.txt
+snare_flare.egg-info/entry_points.txt
+snare_flare.egg-info/requires.txt
+snare_flare.egg-info/top_level.txt

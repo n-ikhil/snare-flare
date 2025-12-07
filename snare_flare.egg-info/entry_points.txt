@@ -1,0 +1,4 @@
+[console_scripts]
+discoverer = discoverer:cli
+midi-sync = midi_sync:cli
+neon = neon:cli

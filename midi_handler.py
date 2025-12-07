@@ -100,7 +100,7 @@ class MIDIHandler:
         
         if msg.type == 'note_on' and msg.velocity > 0:
             # Note On event with velocity > 0 (actual hit)
-            logger.info(f"🎵 Drum hit detected: note={msg.note}, velocity={msg.velocity}")
+            logger.debug(f"🎵 Drum hit detected: note={msg.note}, velocity={msg.velocity}")
             if self.callback:
                 try:
                     logger.debug(f"Calling callback with note={msg.note}, velocity={msg.velocity}")

@@ -1,5 +1,5 @@
 [project]
-name = "snare_flare"
+name = "snare-flare"
 version = "0.1.0"
 description = "Real-time MIDI drum input to LED light synchronization - syncs drum hits from MIDI devices (e.g., Alesis drum kits, GarageBand) with LEDDMX-00 Bluetooth LED devices for visual drum performance effects"
 requires-python = ">=3.8"
@@ -10,12 +10,16 @@ dependencies = [
 ]
 
 [project.scripts]
-discoverer = "led.discoverer:cli"
-neon = "led.neon:cli"
-midi-sync = "led.midi_sync:cli"
+discoverer = "discoverer:cli"
+neon = "neon:cli"
+midi-sync = "midi_sync:cli"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["discoverer", "drum_mapper", "midi_handler", "midi_sync", "neon"]
+
 
 

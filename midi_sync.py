@@ -10,12 +10,12 @@ import sys
 import argparse
 import logging
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from asyncio import Queue
 
-from led.midi_handler import MIDIHandler
-from led.drum_mapper import DrumMapper, DrumType
-from led.neon import LEDController
+from midi_handler import MIDIHandler
+from drum_mapper import DrumMapper, DrumType
+from neon import LEDController
 
 # Configure logging
 logging.basicConfig(
@@ -35,6 +35,7 @@ class MIDISync:
         flash_duration: float = 0.05,  # Reduced default for lower latency
         verbose: bool = False,
         max_event_age: float = 1.0,
+        ignored_drum_types: Optional[List[DrumType]] = None,
     ):
         """
         Initialize MIDI sync.
@@ -46,6 +47,7 @@ class MIDISync:
             verbose: Enable verbose MIDI logging.
             max_event_age: Maximum age in seconds for events to be processed (default: 1.0).
                           Events older than this will be skipped.
+            ignored_drum_types: List of drum types to ignore (e.g., [DrumType.SNARE, DrumType.TOM]).
         """
         self.midi_handler = MIDIHandler(verbose=verbose)
         self.drum_mapper = DrumMapper()
@@ -59,6 +61,7 @@ class MIDISync:
         # High-priority queue for kicks
         self.kick_queue: Queue[Tuple[int, int, float]] = Queue(maxsize=5)
         self.max_event_age = max_event_age  # Skip events older than this
+        self.ignored_drum_types = set(ignored_drum_types) if ignored_drum_types else set()
         self.running = False
         self.original_brightness: Optional[int] = None
         self.original_color: Optional[Tuple[int, int, int]] = None
@@ -137,11 +140,16 @@ class MIDISync:
 
     def _midi_callback(self, note: int, velocity: int):
         """Callback for MIDI events (runs in MIDI thread)."""
-        logger.info(f"🎵 MIDI callback received: note={note}, velocity={velocity}")
+        logger.debug(f"🎵 MIDI callback received: note={note}, velocity={velocity}")
         # Check if it's a kick - prioritize kicks
         drum_type = self.drum_mapper.get_drum_type(note)
         is_kick = (drum_type == DrumType.KICK)
         logger.debug(f"Drum type: {drum_type}, is_kick: {is_kick}")
+        
+        # Skip ignored drum types
+        if drum_type in self.ignored_drum_types:
+            logger.debug(f"⏭️ Ignoring {drum_type.value} (note={note})")
+            return
         
         # Add timestamp to event
         timestamp = time.time()
@@ -153,7 +161,7 @@ class MIDISync:
                 # Kicks go to high-priority queue
                 try:
                     self.kick_queue.put_nowait((note, velocity, timestamp))
-                    logger.info(f"✅ Kick event queued: note={note}, velocity={velocity}")
+                    logger.debug(f"✅ Kick event queued: note={note}, velocity={velocity}")
                 except asyncio.QueueFull:
                     # Queue full - drop oldest and add new
                     try:
@@ -226,8 +234,8 @@ class MIDISync:
             # Turn on and set initial state
             await self.led_controller.power(True)
             # Store original settings for restoration
-            self.original_brightness = 50  # Default
-            self.original_color = (255, 255, 255)  # White
+            self.original_brightness = 0  # Default
+            self.original_color = (255, 100, 0)  # White
             await self.led_controller.set_brightness(self.original_brightness)
             await self.led_controller.set_color(*self.original_color)
             return True
@@ -272,6 +280,7 @@ class MIDISync:
                 await self.led_controller.set_brightness(fade_brightness)
                 # Reset color back to original after fade
                 if self.original_color:
+                    # await self.led_controller.power(False)
                     await self.led_controller.set_color(*self.original_color)
             
             # Create task for fade-back (non-blocking)
@@ -283,15 +292,23 @@ class MIDISync:
         except Exception as e:
             logger.error(f"Error flashing LED: {e}", exc_info=True)
 
-    async def process_midi_event(self, note: int, velocity: int, is_kick: bool = False):
+    async def process_midi_event(self, note: int, velocity: int, timestamp: float, is_kick: bool = False):
         """
         Process a MIDI event and trigger LED response.
         
         Args:
             note: MIDI note number
             velocity: MIDI velocity (0-127)
+            timestamp: Event timestamp (from time.time())
             is_kick: If True, this is a kick (higher priority)
         """
+        # STRICT age check - must be done first, before any processing
+        current_time = time.time()
+        age = current_time - timestamp
+        if age > self.max_event_age:
+            logger.debug(f"⏭️ Skipping stale event in async handler: note={note}, age={age:.3f}s (max={self.max_event_age}s)")
+            return
+        
         # Get drum type, color, and brightness
         drum_type = self.drum_mapper.get_drum_type(note)
         color, brightness = self.drum_mapper.get_color_and_brightness(note, velocity)
@@ -299,8 +316,7 @@ class MIDISync:
 
         # Only log kicks to reduce overhead
         if is_kick:
-            logger.info(f"🥁 KICK! (note {note}, velocity {velocity}) -> RGB{color} @ {brightness}%")
-            print(f"🥁 KICK! → RGB{color} @ {brightness}%")
+            logger.debug(f"🥁 KICK! (note {note}, velocity {velocity}) -> RGB{color} @ {brightness}%")
         else:
             logger.debug(f"🎯 {drum_name} (note {note}, velocity {velocity}) -> RGB{color} @ {brightness}%")
 
@@ -342,26 +358,33 @@ class MIDISync:
             while self.running:
                 try:
                     # Check kick queue first (high priority)
-                    # Process all fresh kicks, skip stale ones
+                    # Drain old kicks, only process the freshest ones
                     kick_processed = False
+                    current_time = time.time()
+                    fresh_kicks = []  # Collect fresh kicks first
+                    
+                    # First pass: drain queue and collect only fresh kicks
                     while True:
                         try:
                             note, velocity, timestamp = self.kick_queue.get_nowait()
-                            # Calculate age right now, not at start of loop
-                            current_time = time.time()
                             age = current_time - timestamp
                             
                             if age > self.max_event_age:
-                                # Event is too old, skip it
-                                logger.debug(f"⏭️ Skipping stale kick: note={note}, age={age:.3f}s")
+                                # Event is too old, skip it completely
+                                logger.debug(f"⏭️ Dropping stale kick: note={note}, age={age:.3f}s")
                                 continue
                             
-                            logger.info(f"Processing kick from queue: note={note}, velocity={velocity}, age={age:.3f}s")
-                            # Process kick (now non-blocking)
-                            asyncio.create_task(self.process_midi_event(note, velocity, is_kick=True))
-                            kick_processed = True
+                            # Keep only fresh kicks
+                            fresh_kicks.append((note, velocity, timestamp, age))
                         except asyncio.QueueEmpty:
                             break
+                    
+                    # Second pass: process all fresh kicks (async function will do final strict age check)
+                    for note, velocity, timestamp, age in fresh_kicks:
+                        logger.info(f"Processing kick from queue: note={note}, velocity={velocity}, age={age:.3f}s")
+                        # Process kick (now non-blocking) - pass timestamp for strict age check
+                        asyncio.create_task(self.process_midi_event(note, velocity, timestamp, is_kick=True))
+                        kick_processed = True
                     
                     if kick_processed:
                         continue
@@ -370,7 +393,7 @@ class MIDISync:
                     # Process all fresh events, skip stale ones
                     try:
                         note, velocity, timestamp = await asyncio.wait_for(
-                            self.midi_queue.get(), timeout=0.01  # Short timeout to check kicks frequently
+                            self.midi_queue.get(), timeout=0.005  # Short timeout to check kicks frequently
                         )
                         # Calculate age right after getting event from queue
                         current_time = time.time()
@@ -382,8 +405,8 @@ class MIDISync:
                             continue
                         
                         logger.info(f"Processing MIDI event from queue: note={note}, velocity={velocity}, age={age:.3f}s")
-                        # Process non-kick (non-blocking)
-                        asyncio.create_task(self.process_midi_event(note, velocity, is_kick=False))
+                        # Process non-kick (non-blocking) - pass timestamp for strict age check
+                        asyncio.create_task(self.process_midi_event(note, velocity, timestamp, is_kick=False))
                     except asyncio.TimeoutError:
                         # No events, continue to check kicks again
                         continue
@@ -425,6 +448,8 @@ class Args(argparse.Namespace):
     flash_duration: float
     verbose: bool
     max_event_age: float
+    ignore: Optional[str]
+    test_midi: bool
 
 
 
@@ -498,12 +523,28 @@ async def main(args: Args):
         
         return 0
 
+    # Parse ignored drum types
+    ignored_drum_types = None
+    if args.ignore:
+        ignored_drum_types = []
+        for drum_name in args.ignore.split(','):
+            drum_name = drum_name.strip().lower()
+            try:
+                # Try to match by name (e.g., "snare", "tom", "kick")
+                drum_type = DrumType(drum_name)
+                ignored_drum_types.append(drum_type)
+            except ValueError:
+                logger.warning(f"Unknown drum type '{drum_name}', ignoring. Valid types: kick, snare, hihat, crash, ride, tom")
+        if ignored_drum_types:
+            print(f"🔇 Ignoring drum types: {', '.join(dt.value for dt in ignored_drum_types)}")
+    
     sync = MIDISync(
         midi_port=args.midi_port,
         led_address=args.led_address,
         flash_duration=args.flash_duration,
         verbose=args.verbose,
         max_event_age=args.max_event_age,
+        ignored_drum_types=ignored_drum_types,
     )
 
     success = await sync.run()
@@ -552,6 +593,13 @@ def cli():
         "--test-midi",
         action="store_true",
         help="Test mode: just listen to MIDI and print events (no LED control)",
+    )
+
+    parser.add_argument(
+        "--ignore",
+        type=str,
+        metavar="DRUM_TYPES",
+        help="Comma-separated list of drum types to ignore (e.g., 'snare,tom' or 'kick,hihat'). Valid types: kick, snare, hihat, crash, ride, tom",
     )
 
     args = parser.parse_args(namespace=Args())

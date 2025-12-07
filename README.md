@@ -43,7 +43,7 @@ Real-time MIDI drum input to LED light synchronization. Transform your drum perf
 
 1. **Start your MIDI source** (drum kit, GarageBand, etc.)
 
-2. **Run snare_flare:**
+2. **Run snare-flare:**
    ```bash
    midi-sync
    ```

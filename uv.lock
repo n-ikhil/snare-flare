@@ -249,25 +249,6 @@ wheels = [
 ]
 
 [[package]]
-name = "led"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "bleak", version = "0.22.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "bleak", version = "1.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "bleak", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "mido" },
-    { name = "python-rtmidi" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "bleak", specifier = ">=0.21.0" },
-    { name = "mido", specifier = ">=1.2.10" },
-    { name = "python-rtmidi", specifier = ">=1.4.9" },
-]
-
-[[package]]
 name = "mido"
 version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
@@ -573,6 +554,25 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/25/89/0a844ce7f774784f08fe230cbd114dccff722122203efcc1a888876ba5d5/python_rtmidi-1.5.8-cp39-cp39-manylinux_2_28_aarch64.whl", hash = "sha256:5966172ed28add6ff2b76d389702931bfc7ff3cc741c0e4b0d1aaae269ab7a8e", size = 293238, upload-time = "2023-11-20T21:54:55.642Z" },
     { url = "https://files.pythonhosted.org/packages/c7/0a/9c719afb56538041c5b970dc3dea41447fec2850039d0d65f9661ea46f50/python_rtmidi-1.5.8-cp39-cp39-manylinux_2_28_x86_64.whl", hash = "sha256:29661939f9b7bd1a4e29835f50f4790e741dacd21a5cb143297aefb51deefdec", size = 304027, upload-time = "2023-11-20T21:54:58.251Z" },
     { url = "https://files.pythonhosted.org/packages/c9/ea/2b775358c10f7ab13e4bbf07c488f9ea7e26728ac3337657b85116c1323d/python_rtmidi-1.5.8-cp39-cp39-win_amd64.whl", hash = "sha256:dd2bcbea822488fca6b8d9fc7e78a91da12914f3b88dc086f051cb65a643449f", size = 132529, upload-time = "2023-11-20T21:55:00.319Z" },
+]
+
+[[package]]
+name = "snare-flare"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "bleak", version = "0.22.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "bleak", version = "1.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "bleak", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "mido" },
+    { name = "python-rtmidi" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bleak", specifier = ">=0.21.0" },
+    { name = "mido", specifier = ">=1.2.10" },
+    { name = "python-rtmidi", specifier = ">=1.4.9" },
 ]
 
 [[package]]

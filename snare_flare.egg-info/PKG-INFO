@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: snare-flare
+Version: 0.1.0
+Summary: Real-time MIDI drum input to LED light synchronization - syncs drum hits from MIDI devices (e.g., Alesis drum kits, GarageBand) with LEDDMX-00 Bluetooth LED devices for visual drum performance effects
+Requires-Python: >=3.8
+Requires-Dist: bleak>=0.21.0
+Requires-Dist: mido>=1.2.10
+Requires-Dist: python-rtmidi>=1.4.9
