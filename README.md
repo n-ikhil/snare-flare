@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="logo.png" alt="Snare Flare Logo" width="200">
+</div>
+
 # Snare Flare 🥁💡
 
 Real-time MIDI drum input to LED light synchronization. Transform your drum performances with dynamic visual effects that respond to every hit in real-time.
